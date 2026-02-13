@@ -1,2 +1,7 @@
 .venv/
 .idea/
+
+workspace/
+
+.env
+prompt.md
