@@ -3,5 +3,5 @@
 
 workspace/
 
-.env
 *.md
+.env
