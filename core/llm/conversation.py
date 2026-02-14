@@ -1,6 +1,14 @@
+from __future__ import annotations
+
+from typing import Dict, List
+
+
 class Conversation:
     def __init__(self):
-        self.messages = []
+        self.messages: List[Dict[str, str]] = []
+
+    def add_system(self, content: str):
+        self.messages.append({"role": "system", "content": content})
 
     def add_user(self, content: str):
         self.messages.append({"role": "user", "content": content})
@@ -9,11 +17,7 @@ class Conversation:
         self.messages.append({"role": "assistant", "content": content})
 
     def add_tool(self, name: str, content: str):
-        self.messages.append({
-            "role": "tool",
-            "name": name,
-            "content": content
-        })
+        self.messages.append({"role": "tool", "name": name, "content": content})
 
     def clear(self):
         self.messages = []
