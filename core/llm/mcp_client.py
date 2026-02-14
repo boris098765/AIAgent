@@ -10,7 +10,13 @@ class MCPClient:
         response = ollama.chat(
             model=self.model,
             messages=messages,
-            tools=tools,
-            options={"keep_alive": KEEP_ALIVE}
+            tools=tools
         )
-        return response
+
+        return {
+            "message": response["message"],
+            "usage": {
+                "prompt_tokens": response.get("prompt_eval_count", 0),
+                "completion_tokens": response.get("eval_count", 0)
+            }
+        }
