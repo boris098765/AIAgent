@@ -3,81 +3,67 @@ from core.llm.mcp_client import MCPClient
 from core.llm.conversation import Conversation
 from core.utils.logging import logger
 
-
-SYSTEM_PROMPT = """
-You are a local autonomous agent.
-If a task requires shell, file, or sub-agent execution — you MUST use tools.
-"""
-
-
 class Agent:
-
-    def __init__(self, registry):
+    def __init__(self, registry, system_prompt=None):
         self.llm = MCPClient()
         self.registry = registry
         self.conversation = Conversation()
-        self.conversation.messages.append({
-            "role": "system",
-            "content": SYSTEM_PROMPT
-        })
+        self.system_prompt = "You are a local autonomous agent, be shortly." if not system_prompt else system_prompt
+
+        self.conversation.messages.append({"role": "system", "content": self.system_prompt})
 
     def clear(self):
         self.conversation = Conversation()
-        self.conversation.messages.append({
-            "role": "system",
-            "content": SYSTEM_PROMPT
-        })
+        self.conversation.messages.append({"role": "system", "content": self.system_prompt})
         logger.info("Memory cleared")
 
     def normalize(self, text: str):
-        if not text:
-            return text
-        return text.replace("\\n", "\n")
+        return text.replace("\\n", "\n") if text else text
 
-    def run(self, user_input: str, depth: int = 0):
-
+    def run(self, user_input: str):
         if user_input.strip() == "/clear":
             self.clear()
             return "Memory cleared."
 
-        if depth > 5:
-            return "Tool recursion limit reached."
-
         self.conversation.add_user(user_input)
-
-        tools = self.registry.schemas()
-        # logger.info(f"TOOLS AVAILABLE: {[t['function']['name'] for t in tools]}")
 
         response = self.llm.chat(
             messages=self.conversation.get(),
-            tools=tools
+            tools=self.registry.schemas()
         )
 
         message = response["message"]
+        usage = response["usage"]
 
-        # logger.info(f"RAW RESPONSE: {message}")
+        used = usage["prompt_tokens"] + usage["completion_tokens"]
+        remaining = 8192 - used
+        logger.info(f"TOKENS | used={used} remaining≈{remaining}")
 
-        if "tool_calls" in message and message["tool_calls"]:
-            for tool_call in message["tool_calls"]:
-                function = tool_call.function if hasattr(tool_call, "function") else tool_call["function"]
-                tool_name = function.name if hasattr(function, "name") else function["name"]
-                arguments = function.arguments if hasattr(function, "arguments") else function["arguments"]
-                if isinstance(arguments, str):
-                    arguments = json.loads(arguments)
+        tool_calls = getattr(message, "tool_calls", None)
+        if not tool_calls:
+            content = self.normalize(getattr(message, "content", ""))
+            self.conversation.add_assistant(content)
+            return content
 
-                logger.info(f"Tool call: {tool_name} | args={arguments}")
+        final_content = ""
+        for tool_call in tool_calls:
+            func = tool_call.function
+            tool_name = func.name
+            arguments = func.arguments
+            if isinstance(arguments, str):
+                arguments = json.loads(arguments)
 
-                tool = self.registry.get(tool_name)
-                result = tool.run(**arguments)
-                result = self.normalize(str(result))
+            logger.info(f"Tool call: {tool_name} | args={arguments}")
+            tool = self.registry.get(tool_name)
+            result = tool.run(**arguments)
+            result = self.normalize(str(result))
+            logger.info(f"Tool result: {result[:200]}")
 
-                logger.info(f"Tool result: {result[:200]}")
-
+            if isinstance(result, dict) and "summary" in result:
+                self.conversation.add_assistant(f"[SubAgent] {result['summary']}")
+                final_content += f"[SubAgent] {result['summary']}\n"
+            else:
                 self.conversation.add_tool(tool_name, result)
+                final_content += f"[{tool_name}] {result}\n"
 
-            return self.run("continue", depth + 1)
-
-        content = self.normalize(message.get("content", ""))
-
-        self.conversation.add_assistant(content)
-        return content
+        return final_content.strip()

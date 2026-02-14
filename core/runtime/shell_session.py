@@ -3,7 +3,6 @@ import threading
 import queue
 from core.runtime.workspace import Workspace
 
-
 class ShellSession:
     def __init__(self):
         self.workspace = Workspace()
@@ -18,7 +17,6 @@ class ShellSession:
             text=True,
             bufsize=1
         )
-
         self.output_queue = queue.Queue()
 
         def reader():
@@ -29,9 +27,7 @@ class ShellSession:
 
     def execute(self, command: str):
         marker = "__END__"
-        cmd = f"{command}\necho {marker}\n"
-
-        self.process.stdin.write(cmd)
+        self.process.stdin.write(f"{command}\necho {marker}\n")
         self.process.stdin.flush()
 
         output = []
@@ -40,5 +36,7 @@ class ShellSession:
             if marker in line:
                 break
             output.append(line)
-
         return "".join(output)
+
+    def close(self):
+        self.process.terminate()
