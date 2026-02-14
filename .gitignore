@@ -4,4 +4,4 @@
 workspace/
 
 .env
-prompt.md
+*.md
