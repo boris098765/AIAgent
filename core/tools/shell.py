@@ -4,7 +4,7 @@ from core.runtime.shell_session import ShellSession
 
 class ShellTool(BaseTool):
     name = "shell"
-    description = "Execute command in persistent shell session"
+    description = "Run shell command in persistent session inside workspace folder"
 
     def __init__(self):
         self.session = ShellSession()
@@ -16,7 +16,10 @@ class ShellTool(BaseTool):
         return {
             "type": "object",
             "properties": {
-                "command": {"type": "string"}
+                "command": {
+                    "type": "string",
+                    "description": "Shell command to execute in workspace folder"
+                }
             },
             "required": ["command"]
         }
