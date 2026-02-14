@@ -9,7 +9,14 @@ from core.utils.logging import logger
 
 
 class Agent:
-    def __init__(self, registry, system_prompt=None, llm_client: MCPClient | None = None, max_steps: int = 8):
+    def __init__(
+        self,
+        registry,
+        system_prompt=None,
+        llm_client: MCPClient | None = None,
+        max_steps: int = 6,
+        max_tool_output_chars: int = 4000,
+    ):
         self.llm = llm_client or MCPClient()
         self.registry = registry
         self.conversation = Conversation()
@@ -17,6 +24,7 @@ class Agent:
             "You are a local autonomous agent, be shortly." if not system_prompt else system_prompt
         )
         self.max_steps = max_steps
+        self.max_tool_output_chars = max_tool_output_chars
         self.conversation.add_system(self.system_prompt)
 
     def clear(self):
@@ -49,11 +57,17 @@ class Agent:
         func = tool_call.function
         return func.name, func.arguments
 
+    def _limit_tool_output(self, text: str) -> str:
+        if len(text) <= self.max_tool_output_chars:
+            return text
+        truncated = len(text) - self.max_tool_output_chars
+        return f"{text[:self.max_tool_output_chars]}\n...[truncated {truncated} chars]"
+
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]):
         logger.info(f"Tool call: {tool_name} | args={arguments}")
         tool = self.registry.get(tool_name)
         result = tool.run(**arguments)
-        normalized = self.normalize(str(result))
+        normalized = self._limit_tool_output(self.normalize(str(result)))
         logger.info(f"Tool result: {normalized[:200]}")
         return result, normalized
 
@@ -66,7 +80,13 @@ class Agent:
 
         final_chunks: List[str] = []
         for _ in range(self.max_steps):
-            response = self.llm.chat(messages=self.conversation.get(), tools=self.registry.schemas())
+            try:
+                response = self.llm.chat(messages=self.conversation.get(), tools=self.registry.schemas())
+            except Exception as exc:
+                logger.error("LLM call failed: %s", exc)
+                final_chunks.append(f"[error] LLM unavailable: {exc}")
+                break
+
             message = response["message"]
             usage = response["usage"]
 
@@ -85,12 +105,17 @@ class Agent:
                 break
 
             for tool_call in tool_calls:
-                tool_name, arguments = self._extract_tool_parts(tool_call)
-                if isinstance(arguments, str):
-                    arguments = json.loads(arguments)
-                arguments = arguments or {}
-
-                raw_result, normalized_result = self._execute_tool(tool_name, arguments)
+                try:
+                    tool_name, arguments = self._extract_tool_parts(tool_call)
+                    if isinstance(arguments, str):
+                        arguments = json.loads(arguments)
+                    arguments = arguments or {}
+                    raw_result, normalized_result = self._execute_tool(tool_name, arguments)
+                except Exception as exc:
+                    logger.exception("Tool execution failed")
+                    normalized_result = f"[tool error] {exc}"
+                    tool_name = tool_name if 'tool_name' in locals() else "unknown_tool"
+                    raw_result = normalized_result
 
                 if isinstance(raw_result, dict) and "summary" in raw_result:
                     summary = f"[SubAgent] {raw_result['summary']}"
